@@ -1,64 +1,98 @@
 
 ## Appendix 2: No Variability Increase vs Precipitation Variability
 ```{r}
-
+# For each scenario and season
 expand_grid(scen = scenario_list, season = season_list) %>%
   {
+    # Exclude hist&nocc if hist_nocc_variability is FALSE
     if (params$hist_nocc_variability == FALSE) filter(., scen != "hist&nocc") else .
   } %>%
+  
+  # For each scenario and season
   pmap(\(scen, season) 
        
+       # For no variability increase and varibility increase
        c(1, params$variability_increase) %>%
          map(\(variability) {
+           
+           # Read crop file
            read_crop_file(fd = fd, iso = "ETH", crop = params$crop, scen = scen, season = season, hist_nocc_variability = params$hist_nocc_variability, variability_increase = variability) %>%
+             
+             # Filter the year of interest
              filter(yr %in% year_list) %>%
+             
+             # Change column name to variability_increase
              mutate(variability_increase = variability)
          }) %>%
+         
+         # Combine the values for both crop file that applies variability increase and that does not
          bind_rows() %>%
+         
+         # Pivot the dataframe so that each row represents each water source and the variables (yld, hect, prod)
          pivot_longer(
            cols = contains(params$crop),
            names_to = c("variable", "water"),
            names_pattern = "([a-z]+)_[a-z]+_([a-z]+)",
            values_to = "value"
          ) %>%
+         
+         # Choose only yld
          filter(variable == "yld") %>%
+         
+         # Convert variability_increase into percentage
+         # group : a variable that reflect values that will be represented in a single density line
          mutate(
            variability_increase = paste0((variability_increase - 1)*100, "%"),
            group = paste0(yr, variability_increase)
-           ) %>%
-         ggplot()+
-          geom_density(aes(x = value, group = group, color = variability_increase, linetype = factor(yr)))+
+         ) %>%
          
-          scale_linetype_manual(name = "Year", values = c("2050" = "dashed", "2069" = "solid"))+
-
-          facet_wrap(~factor(water, labels = c("Rainfed", "Irrigated"), levels = c("rnfd", "irri")), nrow = 2, ncol = 1, scales = "fixed", strip.position = "right")+
-          scale_color_manual(name = c("Increase in Precipitation Variability"), values = variability_palette, breaks = c("0%", "14%"))+
-          scale_x_continuous(
-            breaks = breaks_width(width = 500),
-            minor_breaks = breaks_width(width = 100)
-            )+ 
-          scale_y_continuous(
-            breaks = breaks_width(width = 0.001),
-            minor_breaks = breaks_width(width = 0.0005)
-            )+
-          labs(
-            title = str_to_title(paste0("Difference in National Yield of ", params$full_crop, " in Ethiopia when Precipitation Variability Increases")),
-            subtitle = str_to_title(paste("In", scen, "Scenario During", season, "season", sep = " ")),
-            x = paste0("National Yield of ", params$full_crop),
-            y = "Density",
-          ) +
+         # Create graph
+         ggplot()+
+         
+         # Create density plot
+         geom_density(aes(x = value, group = group, color = variability_increase, linetype = factor(yr)))+
+         
+         # Linetype represent the year
+         scale_linetype_manual(name = "Year", values = c("2050" = "dashed", "2069" = "solid"))+
+         
+         # Facet based on the water source
+         facet_wrap(~factor(water, labels = c("Rainfed", "Irrigated"), levels = c("rnfd", "irri")), nrow = 2, ncol = 1, scales = "fixed", strip.position = "right")+
+         
+         # Color represents the variability increase value
+         scale_color_manual(name = c("Increase in Precipitation Variability"), values = variability_palette, breaks = c("0%", "14%"))+
+         
+         # Determine the scale of the axis
+         scale_x_continuous(
+           breaks = breaks_width(width = 500),
+           minor_breaks = breaks_width(width = 100)
+         )+ 
+         scale_y_continuous(
+           breaks = breaks_width(width = 0.001),
+           minor_breaks = breaks_width(width = 0.0005)
+         )+
+         
+         # Labels
+         labs(
+           title = str_to_title(paste0("Difference in National Yield of ", params$full_crop, " in Ethiopia when Precipitation Variability Increases")),
+           subtitle = str_to_title(paste("In", scen, "Scenario During", season, "season", sep = " ")),
+           x = paste0("National Yield of ", params$full_crop),
+           y = "Density",
+         ) +
+         
          theme_bw() +
+         
+         # Position of the legend
          theme(
            legend.position = c(0.85, 0.80),
-            legend.box = "vertical",
-            legend.margin = margin(),
-            legend.text = element_text(size = 7),
-            legend.title = element_text(size = 8),
-            legend.key.size = unit(0.8, "lines"),
-            text = element_text(family = 'Times')
+           legend.box = "vertical",
+           legend.margin = margin(),
+           legend.text = element_text(size = 7),
+           legend.title = element_text(size = 8),
+           legend.key.size = unit(0.8, "lines"),
+           text = element_text(family = 'Times')
          )
        
   ) 
-  
-  
+
+
 ```
