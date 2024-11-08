@@ -294,5 +294,3 @@ quarto_render("03_01_ethiopia_yield_analysis.qmd",
               ), 
               output_file = file_name, 
               output_format = "docx")
-
-=
