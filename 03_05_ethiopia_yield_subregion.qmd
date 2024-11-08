@@ -1,0 +1,81 @@
+## Analysis of `r params$full_crop` Yield in a Subregional Level
+```{r function_subregional_level}
+#| output: false
+source("04_01_visualization_function.R")
+
+subnational_visualization <- function(aggregation){
+  
+  # Variable 
+  subregion_name <- case_when(
+  aggregation == "regional" ~ "region",
+  aggregation == "aez5" ~ "aez5"
+  )
+  
+  # Read File
+  region_df <- expand_grid(season_list, scenario_list) %>%
+    pmap(\(season_list, scenario_list) read_crop_file(fd = fd, iso = "ETH", crop = params$crop, scen = scenario_list, variability_increase = params$variability_increase, hist_nocc_variability = params$hist_nocc_variability, aggregation = aggregation, season = season_list)) %>%
+      bind_rows()
+  
+  # Wrangle Dataframe for Table
+  table_df <- region_df %>% 
+    select(-contains("irri")) %>%
+    rename(subregion = any_of(subregion_name)) %>%
+    rename_with(~str_extract(.x, "([a-z]+)_[a-z]+_[a-z]+", group = 1), contains(params$crop)) %>%
+    pivot_wider(names_from = planting_season, values_from = c(hect, prod, yld), values_fill = 0) %>%
+    mutate(hect = hect_meher + hect_belg) %>% 
+    mutate(yld = yld_meher * (hect_meher/hect) + yld_belg * (hect_belg/hect)) %>%
+    select(c("sim_num", "yr", "subregion", "scenario", "yld")) %>%
+    group_by(yr, subregion, scenario) %>%
+    summarize(median = median(yld), extreme = quantile(yld, 0.05)) 
+  
+  # Create Table
+  lapply(c("median", "extreme"), 
+       function(stat_variable){
+          table_df %>%
+            ungroup() %>%
+            filter(yr %in% c(2040, 2050, 2060)) %>%
+            mutate(case = paste0(yr_scenario = paste(yr, scenario, sep = "_"))) %>%
+            mutate(scenario = factor(scenario, levels = c("hist&nocc", "PARIS_1p5C", "BASECOV"))) %>%
+            arrange(yr, scenario) %>%
+            select(c("subregion", "case", any_of(stat_variable))) %>%
+            rename(value = stat_variable) %>%
+            rename_with(~case_when(
+              aggregation == "regional" ~ "Subregion (Region)",
+              aggregation == "aez5" ~ "Subregion (Agroecological Zone)"), 
+              subregion) %>%
+            pivot_wider(names_from = case, values_from = value) %>%
+            flextable() %>%
+            separate_header() |>
+            set_caption(caption = case_when(
+              stat_variable == "median" ~ "The Median Value of the Yield by Region",
+              stat_variable == "extreme" ~ "The 5% Percentile Value of the Yield by Region")) |>
+            align(align = "center", part = "all") |>
+            autofit() |>
+            theme_vanilla() |>
+            fit_to_width(7.5) 
+         }
+  )
+}
+
+```
+
+```{r table_subregional}
+#| output: true
+table <- lapply(c("regional", "aez5"), subnational_visualization) %>%
+  list_flatten() 
+```
+
+
+```{r }
+table[[1]]
+```
+```{r}
+table[[2]]
+```
+```{r}
+table[[3]]
+```
+```{r}
+table[[4]]
+```
+

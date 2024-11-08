@@ -1,0 +1,52 @@
+# Distribution of Maximum Temperature and Precipitation by Seasons and Scenarios
+
+## 2050
+### No Increase in Precipitation Variability vs `r (params$variability_increase - 1) * 100`% Increase in Precipitation Variability
+
+```{r weight_result_df}
+#| echo: false
+#| output: false
+
+weighting_result <- expand_grid(season = season_list, scen = scenario_list, variability_increase = c(1, params$variability_increase)) %>%
+  mutate(variability_increase = ifelse((scen == "hist&nocc") & (params$hist_nocc_variability == FALSE), 1, variability_increase))%>%
+  distinct(season, scen, variability_increase, .keep_all = TRUE) %>%
+  pmap(\(season, scen, variability_increase) weighted_climate_combine(iso = "ETH", scen = scen, season = season, chosen_yr = 2050, variable_list = variable_list, variability_increase = variability_increase, crop = params$crop, min_crop = params$min_crop, hist_nocc_variability = params$hist_nocc_variability, input_fd = input_fd))
+
+```
+
+```{r graph_weighted_result, layout.ncol = 2}
+#| echo: false
+
+graph_addition <- function(graph){
+  graph +  
+    coord_cartesian(
+      xlim = c(20, 27),
+      ylim = c(0, 400)
+    )
+}
+
+weighting_result |>
+  map(~ graph_addition(temp_prec_density_function(.x)))
+
+```
+
+## 2069
+### No Increase in Precipitation Variability vs `r (params$variability_increase - 1) * 100`% Increase in Precipitation Variability
+
+```{r weight_result_df_2069}
+#| echo: false
+#| output: false
+
+
+weighting_result_2069 <- expand_grid(season = season_list, scen = scenario_list, variability_increase = list(1, params$variability_increase)) %>%
+  mutate(variability_increase = ifelse((scen == "hist&nocc") & (params$hist_nocc_variability == FALSE), 1, variability_increase))%>%
+  distinct(season, scen, variability_increase, .keep_all = TRUE) %>%
+  pmap(\(season, scen, variability_increase) weighted_climate_combine(iso = "ETH", scen = scen, season = season, chosen_yr = 2069, variable_list = variable_list, variability_increase = variability_increase, crop = params$crop, min_crop = params$min_crop, hist_nocc_variability = params$hist_nocc_variability, input_fd = input_fd))
+
+```
+
+```{r graph_weighted_result_2069, layout.ncol = 2}
+weighting_result_2069 |>
+  map(~ graph_addition(temp_prec_density_function(.x)))
+
+```

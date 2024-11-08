@@ -1,0 +1,494 @@
+---
+title: "`r params$full_crop` Yield Report for Ethiopia"
+format: 
+  docx: 
+    fig-width: 10
+    fig-height: 5
+editor: visual
+echo: false
+message: false
+results: 'hide'
+warning: false
+params:
+  crop: "maiz"
+  full_crop: "Maize"
+  min_crop: "mz"
+  variability_increase: 1
+  season_list: "meher, belg"
+  scenario_list: "hist&nocc, BASECOV"
+  water_list: "rnfd, irri"
+  aggregation: "regional"
+  hist_nocc_variability: false
+  include_climate: true
+---
+
+```{r import_function_variables}
+#| output: false
+library(dplyr)
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
+
+library(haven)
+library(ggplot2)
+library(stringr)
+library(scales)
+library(purrr)
+library(tidyr)
+library(forcats)
+#library(gt)
+library(flextable)
+library(glue)
+library(stringr)
+
+
+# Import Directories
+setwd("/Users/minahkim/Documents/CIAT/weather-variability-yield-prediction/01_code")
+input_fd <- "/Volumes/TOSHIBA EXT/CIAT/Data/Input_data/"
+fd <- "/Volumes/T9/"
+
+# list
+season_list <- str_split(params$season_list, ", ")[[1]]
+scenario_list <- str_split (params$scenario_list, ", ")[[1]]
+variable_list <- list("tmax", "prec")
+year_list <- list(2050, 2069)
+water_list <- str_split(params$water_list, ", ")[[1]]
+
+# Color Palette
+# darkred, blue4
+scenario_paleet <- c("histnocc" = "grey", "BASECOV" = "darkorange", "PARIS_1p5C" = "deepskyblue")
+variability_palette <- c("0%" = "#FDC718FF", "14%" = "#1942CDFF")
+
+# Import Functions
+source("04_01_visualization_function.R")
+
+```
+
+# Distribution of `r params$full_crop` Yield by Seasons and Scenarios (National Level)
+
+```{r total_df}
+#| output: false
+total_df <- expand_grid(season_list, scenario_list) %>%
+  pmap(~ read_crop_file(fd = fd, iso = "ETH", crop = params$crop, scen = .y, season = .x, hist_nocc_variability = params$hist_nocc_variability, variability_increase = params$variability_increase)) |>
+  bind_rows()
+
+```
+
+```{r quantile_table}
+#| output: false
+
+quantile_table <- function (total_df, chosen_yr, season_list, scenario_list, water){
+  
+  # Order Column based on Season & Scenario
+  column_list <- expand_grid(season_list, scenario_list) %>%
+    mutate(scenario_list = case_when(scenario_list == "hist&nocc" ~ "histnocc",
+                                scenario_list == "PARIS_1p5C" ~ "PARIS1p5C",
+                                TRUE ~ scenario_list),
+           season_list = str_to_title(season_list)) 
+  
+  # Assign levels based on Season & Scenario
+  column_list$season_list <- factor(column_list$season_list, levels = c("Meher", "Belg"))
+  column_list$scenario_list <- factor(column_list$scenario_list, levels = c("histnocc", "PARIS1p5C", "BASECOV"))
+  
+  # Reorder based on the levels
+  column_list <- column_list %>%
+    mutate(columns = paste0(season_list, "_", scenario_list)) %>%
+    arrange(scenario_list) %>%
+    arrange(season_list) %>%
+    pull(columns)
+  
+  # Create table
+  total_df %>% 
+    
+    # Filter data for a specific year
+    filter(yr == chosen_yr) %>%
+    
+    # Simplify the notation of the GHG emission cases
+    mutate(scenario = case_when(scenario == "hist&nocc" ~ "histnocc",
+                                scenario == "PARIS_1p5C" ~ "PARIS1p5C",
+                                TRUE ~ scenario)) %>%
+    
+    # Change the notation of the planting season
+    mutate(planting_season = str_to_title(planting_season))%>%
+    
+    # Remove the unique component of the variable names (crops)
+    rename_with(~str_replace(.x, paste0(params$crop, "_"), ""), contains(params$crop)) %>%
+    
+    # Group by planting season and GHG emission scenario
+    group_by(planting_season, scenario) %>%
+    
+    # Calculate the 5%, 25%, 50% (median), 75%, 95% percentile
+    {if(water == "rnfd") 
+      summarize(.,
+      percentile_5 = quantile(yld_rnfd, 0.05),
+      percentile_25 = quantile(yld_rnfd, 0.25),
+      percentile_50 = quantile(yld_rnfd, 0.50),
+      percentile_75 = quantile(yld_rnfd, 0.75),
+      percentile_95 = quantile(yld_rnfd, 0.95)
+      ) else summarize(.,
+      percentile_5 = quantile(yld_irri, 0.05),
+      percentile_25 = quantile(yld_irri, 0.25),
+      percentile_50 = quantile(yld_irri, 0.50),
+      percentile_75 = quantile(yld_irri, 0.75),
+      percentile_95 = quantile(yld_irri, 0.95))
+      } %>%
+    
+    # Reframe the table so the rows will have percentile and the colums will have the season for each GHG scenario
+    pivot_longer(cols = starts_with("percentile"), names_to = "percentile") %>%
+    mutate(percentile = paste0(str_replace(percentile, "percentile_", ""), "%"))%>%
+    pivot_wider(
+      names_from = c(planting_season, scenario)
+    ) %>%
+    
+    # Reorder the dataframe
+    select(all_of(c("percentile", column_list)))%>%
+    
+    # Capitalize a column name
+    rename(Percentile = percentile)
+}
+
+```
+
+```{r mean_sd_table}
+#| output: false
+
+mean_sd_table <- function(total_df, chosen_yr, season_list, scenario_list, water){
+  
+  # Order Column based on Season & Scenario
+  column_list <- expand_grid(season_list, scenario_list) %>%
+    mutate(scenario_list = case_when(scenario_list == "hist&nocc" ~ "histnocc",
+                                scenario_list == "PARIS_1p5C" ~ "PARIS1p5C",
+                                TRUE ~ scenario_list),
+           season_list = str_to_title(season_list)) 
+  
+  # Assign levels based on Season & Scenario
+  column_list$season_list <- factor(column_list$season_list, levels = c("Meher", "Belg"))
+  column_list$scenario_list <- factor(column_list$scenario_list, levels = c("histnocc", "PARIS1p5C", "BASECOV"))
+  
+  # Reorder based on the levels
+  column_list <- column_list %>%
+    mutate(columns = paste0(season_list, "_", scenario_list)) %>%
+    arrange(scenario_list) %>%
+    arrange(season_list) %>%
+    pull(columns)
+  
+  total_df %>% 
+    
+    # Filter data for a specific year
+    filter(yr == chosen_yr) %>%
+    
+    # Simplify the notation of the GHG emission cases
+    mutate(scenario = case_when(scenario == "hist&nocc" ~ "histnocc",
+                                scenario == "PARIS_1p5C" ~ "PARIS1p5C",
+                                TRUE ~ scenario)) %>%
+    
+    # Remove the unique component of the variable names (crops)
+    rename_with(~str_replace(.x, paste0(params$crop, "_"), ""), contains(params$crop)) %>%
+    
+    # Change the notation of the planting season
+    mutate(planting_season = str_to_title(planting_season))%>%
+    
+    # Group by planting season and GHG emission scenarios
+    group_by(planting_season, scenario) %>%
+    
+    # Calculate the mean and the standard deviation
+    {if (water == "rnfd") 
+      summarize(.,
+      mean = mean(yld_rnfd),
+      standard_deviation = sd(yld_rnfd)) else
+      summarize(.,
+      mean = mean(yld_irri),
+      standard_deviation = sd(yld_irri))
+      } %>%
+    
+    # Reframe the table so the rows will have mean / standard deviation and the colums will have the season for each GHG scenario
+    pivot_longer(cols = c("mean", "standard_deviation"), names_to = "Values") %>%
+    mutate(Values = ifelse(Values == "mean", "Mean", "Standard Deviation")) %>%
+    pivot_wider(
+      names_from = c(planting_season, scenario)
+    ) %>%
+    
+    # Reorder the dataframe
+    select(all_of(c("Values", column_list)))
+  } 
+```
+
+```{r generate_table}
+#|output: false
+
+# Generate talbe for all casese
+df_table <- expand_grid(year_list, water_list) %>%
+  rename(year = year_list, water = water_list) |>
+  pmap(\(year, water) list(quantile_table(total_df = total_df, chosen_yr = year, season_list = season_list, scenario_list = scenario_list, water = water), mean_sd_table(total_df = total_df, chosen_yr = year, season_list = season_list, scenario_list = scenario_list, water = water))) |> list_flatten()
+```
+
+## Rainfed
+
+### 2050
+
+```{r}
+flextable(df_table[[1]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+      theme_vanilla()
+```
+
+```{r}
+flextable(df_table[[2]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+      theme_vanilla()
+```
+
+### 2069
+
+```{r}
+flextable(df_table[[5]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+      theme_vanilla()
+```
+
+```{r}
+flextable(df_table[[6]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+    theme_vanilla()
+
+```
+
+```{r}
+# Create a graph that comparse hist&nocc to other scenarios for different years
+total_graph <- total_df %>%
+  
+  # Filter only the year 2020 for hist&nocc and the year 2050 and 2069 for other scenarios
+  filter((yr == 2020 & scenario == "hist&nocc")|(yr %in% c(2050, 2069) & scenario != "hist&nocc")) %>%
+  
+  # Remove the unique component of the variable names (crops)
+  rename_with(~str_replace(.x, paste0(params$crop, "_"), ""), contains(params$crop)) %>%
+  
+  # Create a column that identifies which rows should be represented in a single density function
+  mutate(group = paste0(yr, scenario, planting_season)) %>%
+  
+  # Change the notation of hist&nocc and planting season
+  mutate(scenario = ifelse(scenario == "hist&nocc", "histnocc", scenario)) %>%
+  mutate(planting_season = str_to_title(planting_season)) %>%
+  
+  # Create a graph
+  ggplot()+
+  
+  # Generate the density graph
+  geom_density(aes(x = yld_rnfd, group = group, color = scenario, linetype = factor(yr)), adjust = 1.5)+
+  
+  # Create a facet for different farming seasons
+  facet_wrap(~factor(planting_season, levels = c("Meher", "Belg")), nrow = 2, ncol = 1, scales = "fixed", strip.position = "right")+
+  
+  # Colors represent scenario
+  scale_color_manual(values = scenario_paleet, 
+                         breaks = c("histnocc", "PARIS_1p5C", "BASECOV"),
+                         labels = c("2020 Historical & No Climate Change", "PARIS 1.5C", "BASECOV"))+
+  
+  # Linetype represent years
+  scale_linetype_manual(name = "Year", values = c("2020" = "solid", "2050" = "dashed", "2069" = "solid"))+
+  
+  # Define the scale of the x and y axis
+  scale_x_continuous(
+        breaks = breaks_width(width = 500),
+        minor_breaks = breaks_width(width = 100))+ 
+  scale_y_continuous(
+        breaks = breaks_width(width = 0.001),
+        minor_breaks = breaks_width(width = 0.0005) 
+  )+
+  theme_bw()+
+  
+  # Choose the font and locate the legend box
+  theme(
+        text = element_text(family = "Times"),
+        legend.position = c(0.15, 0.78),
+        legend.box = "vertical",
+        legend.margin = margin(),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.key.size = unit(0.8, "lines")
+
+      )+
+  
+  # Determine the order to show up in the legend
+  guides(
+      color = guide_legend(order = 1),
+      linetype = guide_legend(order = 2)
+    )+
+  
+  # Labels
+  labs(
+        x = paste0("National Yield of ", params$full_crop),
+        y = "Density", 
+        color = "Scenarios",
+        title = str_to_title(paste0("Change in National Yield of ",  params$full_crop, " in Ethiopia in Meher and Belg (Rainfed)")),
+        subtitle = ifelse(params$variability_increase != 1, 
+                          str_to_title(paste0((params$variability_increase - 1)*100, "% Variability Increase in Precipitation")),
+                          str_to_title("No Variability Increase in Precipitation")
+                          )
+      )
+  total_graph
+```
+
+## Irrigated
+
+### 2050
+
+```{r}
+flextable(df_table[[3]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+    theme_vanilla()
+
+```
+
+```{r}
+flextable(df_table[[4]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+    theme_vanilla()
+
+```
+
+### 2069
+
+```{r}
+flextable(df_table[[7]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+    theme_vanilla()
+
+```
+
+```{r}
+flextable(df_table[[8]])|>
+      separate_header() |>
+      align(align = "center", part = "all") |>
+      autofit() |>
+    theme_vanilla()
+
+```
+
+```{r}
+# Create a graph that comparse hist&nocc to other scenarios for different years in irrigation
+total_graph <- total_df %>%
+  filter((yr == 2020 & scenario == "hist&nocc")|(yr %in% c(2050, 2069) & scenario != "hist&nocc")) %>%
+  rename_with(~str_replace(.x, paste0(params$crop, "_"), ""), contains(params$crop)) %>%
+  mutate(group = paste0(yr, scenario, planting_season)) %>%
+  mutate(scenario = ifelse(scenario == "hist&nocc", "histnocc", scenario)) %>%
+  mutate(planting_season = str_to_title(planting_season)) %>%
+  ggplot()+
+  geom_density(aes(x = yld_irri, group = group, color = scenario, linetype = factor(yr)), adjust = 1.5)+
+  facet_wrap(~factor(planting_season, levels = c("Meher", "Belg")), nrow = 2, ncol = 1, scales = "fixed", strip.position = "right")+
+  scale_color_manual(values = scenario_paleet, 
+                         breaks = c("histnocc", "PARIS_1p5C", "BASECOV"),
+                         labels = c("2020 Historical & No Climate Change", "PARIS 1.5C", "BASECOV"))+
+  scale_linetype_manual(name = "Year", values = c("2020" = "solid", "2050" = "dashed", "2069" = "solid"))+
+  scale_x_continuous(
+        breaks = breaks_width(width = 500),
+        minor_breaks = breaks_width(width = 100))+ 
+  scale_y_continuous(
+        breaks = breaks_width(width = 0.001),
+        minor_breaks = breaks_width(width = 0.0005) 
+  )+
+  theme_bw()+
+  theme(
+        text = element_text(family = "Times"),
+        legend.position = c(0.85, 0.78),
+        legend.box = "vertical",
+        legend.margin = margin(),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.key.size = unit(0.8, "lines")
+
+      )+
+  guides(
+      color = guide_legend(order = 1),
+      linetype = guide_legend(order = 2)
+    )+
+  labs(
+        x = paste0("National Yield of ", params$full_crop),
+        y = "Density", 
+        color = "Scenarios",
+        title = str_to_title(paste0("Change in National Yield of ", params$full_crop, " in Ethiopia in Meher and Belg (Irrigated)")),
+        subtitle = ifelse(params$variability_increase != 1, 
+                          str_to_title(paste0((params$variability_increase - 1)*100, "% Variability Increase in Precipitation")),
+                          str_to_title("No Variability Increase in Precipitation")
+                          )
+      )
+  #ggsave(plot = total_graph, filename = "eth_maize_yield_meher_belg.png", path = "../02_report", width = 10, height = 5)
+  total_graph
+```
+
+```{r child=if(params$aggregation != "national") '04_05_ethiopia_yield_subregion.qmd'}
+```
+
+```{r child=if(params$variability_increase != 1) '04_03_ethiopia_climate_analysis.qmd'}
+```
+
+## Appendix 1: Rainfed vs Irrigated Comparison Graph
+
+```{r rainfed_and_irrigated}
+season_list %>%
+  map( ~{
+      total_df %>%
+    filter(planting_season == .x) %>%
+    filter((yr == 2020 & scenario == "hist&nocc")|(yr %in% c(2050, 2069) & scenario != "hist&nocc")) %>%
+    rename_with(~str_replace(.x, paste0(params$crop, "_"), ""), contains(params$crop)) %>%
+    select(c("sim_num", "yr", "yld_rnfd", "yld_irri", "scenario", "planting_season")) %>%
+    pivot_longer(cols = contains("yld"), names_to = "water", names_pattern = "yld_(\\w+)", values_to = "yld") %>%
+    mutate(group = paste0(yr, scenario, water)) %>%
+    mutate(scenario = ifelse(scenario == "hist&nocc", "histnocc", scenario)) %>%
+    mutate(water = ifelse(water == "irri", "Irrigation", "Rainfed")) %>%
+    ggplot()+
+    geom_density(aes(x = yld, group = group, color = scenario, linetype = factor(yr)), adjust = 1.5)+
+    facet_wrap(~factor(water, levels = c("Rainfed", "Irrigation")), nrow = 2, ncol = 1, scales = "fixed", strip.position = "right")+
+    scale_color_manual(values = scenario_paleet, 
+                           breaks = c("histnocc", "PARIS_1p5C", "BASECOV"),
+                           labels = c("2020 Historical & No Climate Change", "PARIS 1.5C", "BASECOV"))+
+    scale_linetype_manual(name = "Year", values = c("2020" = "solid", "2050" = "dashed", "2069" = "solid"))+
+    scale_x_continuous(
+          breaks = breaks_width(width = 500),
+          minor_breaks = breaks_width(width = 100))+ 
+    scale_y_continuous(
+          breaks = breaks_width(width = 0.001),
+          minor_breaks = breaks_width(width = 0.0005) 
+    )+
+    theme_bw()+
+    theme(
+          text = element_text(family = "Times"),
+          legend.position = c(0.85, 0.78),
+          legend.box = "vertical",
+          legend.margin = margin(),
+          legend.text = element_text(size = 7),
+          legend.title = element_text(size = 8),
+          legend.key.size = unit(0.8, "lines")
+  
+        )+
+    guides(
+        color = guide_legend(order = 1),
+        linetype = guide_legend(order = 2)
+      )+
+    labs(
+          x = paste0("National Yield of ", params$full_crop),
+          y = "Density", 
+          color = "Scenarios",
+          subtitle = str_to_title(paste0("Change in National Yield of ", params$full_crop, " in Ethiopia in Rainfed and Irrigated (", .x,")"))
+        )
+    })
+
+
+```
+
+```{r child=if(params$variability_increase != 1) '04_04_ethiopia_yield_with_variability.qmd'}
+
+```
